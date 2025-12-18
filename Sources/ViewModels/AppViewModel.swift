@@ -36,7 +36,23 @@ class AppViewModel: ObservableObject {
             
             guard !tracksToDelete.isEmpty else { return }
             
-            statusMessage = "Moving \(tracksToDelete.count) tracks to Trash..."
+            statusMessage = "Processing \(tracksToDelete.count) tracks..."
+            
+            // 1. Remove from Music.app Library (Ghost Track Fix)
+            // We do this first so the entry is gone.
+            var libraryDeletionCount = 0
+            for track in tracksToDelete {
+                do {
+                    try await MusicAppBridge.deleteTrack(persistentID: track.id)
+                    libraryDeletionCount += 1
+                } catch {
+                    print("Failed to remove track \(track.title) from Music library: \(error)")
+                    // Continue anyway to try and delete the file
+                }
+            }
+            
+            // 2. Move Physical Files to Trash
+            statusMessage = "Removed \(libraryDeletionCount) from Library. Moving files to Trash..."
             
             do {
                 let deletedCount = try await trashHandler.moveTracksToTrash(tracksToDelete)
@@ -45,19 +61,16 @@ class AppViewModel: ObservableObject {
                 let deletedIDs = Set(tracksToDelete.map { $0.id })
                 self.tracks.removeAll(where: { deletedIDs.contains($0.id) })
                 
-                // Re-calculate duplicates (or just remove them from groups locally for speed)
-                // For simplicity, we just filter them out of current groups and cleanup empty groups
+                // Re-calculate duplicates
                 self.duplicateGroups = self.duplicateGroups.compactMap { group in
                     var newGroup = group
                     newGroup.tracks.removeAll(where: { deletedIDs.contains($0.id) })
-                    // Reset selection state for safely
                     newGroup.tracksToRemove.subtract(deletedIDs)
-                    newGroup.tracksToKeep.subtract(deletedIDs) // Should not happen if logic correct
                     
                     return newGroup.tracks.count > 1 ? newGroup : nil
                 }
                 
-                statusMessage = "Moved \(deletedCount) tracks to Trash."
+                statusMessage = "Cleaned up \(deletedCount) files (\(libraryDeletionCount) from Library)."
             } catch {
                 statusMessage = "Error deleting tracks: \(error.localizedDescription)"
             }

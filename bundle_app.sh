@@ -21,6 +21,11 @@ cp "${BUILD_DIR}/${APP_NAME}" "${MACOS_DIR}/"
 echo "Copying Info.plist..."
 cp Info.plist "${CONTENTS_DIR}/"
 
+if [ -f "AppIcon.icns" ]; then
+    echo "Copying AppIcon..."
+    cp "AppIcon.icns" "${RESOURCES_DIR}/"
+fi
+
 echo "Signing (Ad-Hoc)..."
 codesign --force --deep --sign - "${APP_BUNDLE}"
 

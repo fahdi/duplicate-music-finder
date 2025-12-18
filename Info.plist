@@ -6,6 +6,8 @@
 	<string>DuplicateMusicFinder</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.antigravity.dedupe</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
 	<key>CFBundleName</key>
 	<string>DuplicateMusicFinder</string>
 	<key>CFBundleShortVersionString</key>

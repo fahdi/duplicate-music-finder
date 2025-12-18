@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>DuplicateMusicFinder</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.antigravity.dedupe</string>
+	<key>CFBundleName</key>
+	<string>DuplicateMusicFinder</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>This app needs access to your Music library to scan for duplicate tracks.</string>
+</dict>
+</plist>

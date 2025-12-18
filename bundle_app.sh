@@ -26,6 +26,12 @@ if [ -f "AppIcon.icns" ]; then
     cp "AppIcon.icns" "${RESOURCES_DIR}/"
 fi
 
+if [ -f "Resources/fpcalc" ]; then
+    echo "Copying fpcalc (Chromaprint)..."
+    cp "Resources/fpcalc" "${RESOURCES_DIR}/"
+    chmod +x "${RESOURCES_DIR}/fpcalc"
+fi
+
 echo "Signing (Ad-Hoc)..."
 codesign --force --deep --sign - "${APP_BUNDLE}"
 

@@ -18,11 +18,27 @@ class AppViewModel: ObservableObject {
     @Published var autoPlayEnabled: Bool = true
     let audioPlayer = AudioPlayerService()
     
+    // Smart Tag / Identify State
+    @Published var identifyResults: [IdentifyResult] = []
+    @Published var isIdentifying: Bool = false
+    @Published var showIdentifyView: Bool = false
+    private var shouldAbortIdentify = false
+    
+    // AcoustID API Key from https://acoustid.org/my-applications
+    var acoustidApiKey: String = "RsAFCdlGZU"
+    
     private let scanner = MusicScanner()
     private let duplicateEngine = DuplicateEngine()
     private let selectionManager = SelectionManager()
     private let trashHandler = FileTrashHandler()
     private let fingerprintService = AudioFingerprintService()
+    
+    // Smart Tag Services
+    private let chromaprintService = ChromaprintService()
+    private lazy var acoustidService = AcoustIDService(apiKey: acoustidApiKey)
+    private let musicBrainzService = MusicBrainzService()
+    private let coverArtService = CoverArtService()
+    private let metadataWriterService = MetadataWriterService()
     
     /// Play a track if auto-play is enabled
     func playTrackIfEnabled(_ track: TrackModel) {
@@ -245,6 +261,188 @@ class AppViewModel: ObservableObject {
                 self.statusMessage = "Error scanning folder: \(error.localizedDescription)"
             }
             self.isScanning = false
+        }
+    }
+    
+    // MARK: - Smart Tag / Identify
+    
+    @MainActor
+    func identifyTracks(_ tracksToIdentify: [TrackModel]) {
+        guard !isIdentifying else { return }
+        guard !acoustidApiKey.isEmpty else {
+            statusMessage = "Please set your AcoustID API key first"
+            return
+        }
+        
+        isIdentifying = true
+        showIdentifyView = true
+        
+        // Initialize results with pending status
+        identifyResults = tracksToIdentify.map { track in
+            IdentifyResult(
+                originalTrack: track,
+                suggestedMetadata: [],
+                selectedMetadataIndex: nil,
+                status: .pending
+            )
+        }
+        
+        Task {
+            for i in 0..<identifyResults.count {
+                // Check for abort
+                if shouldAbortIdentify {
+                    shouldAbortIdentify = false
+                    statusMessage = "Identification aborted"
+                    break
+                }
+                await identifySingleTrack(at: i)
+            }
+            
+            isIdentifying = false
+            let foundCount = identifyResults.filter { 
+                if case .found = $0.status { return true }
+                return false
+            }.count
+            statusMessage = "Identified \(foundCount)/\(identifyResults.count) tracks"
+        }
+    }
+    
+    @MainActor
+    private func identifySingleTrack(at index: Int) async {
+        let track = identifyResults[index].originalTrack
+        guard let fileURL = track.fileURL else {
+            identifyResults[index].status = .error("No file URL")
+            return
+        }
+        
+        identifyResults[index].status = .identifying
+        statusMessage = "Identifying: \(track.title)..."
+        
+        do {
+            // Step 1: Generate Chromaprint fingerprint
+            let (fingerprint, duration) = try await chromaprintService.generateFingerprint(for: fileURL)
+            
+            // Step 2: Look up in AcoustID
+            let acoustResults = try await acoustidService.lookup(fingerprint: fingerprint, duration: duration)
+            
+            // Step 3: Get detailed metadata from MusicBrainz for top matches
+            var metadataResults: [MusicMetadata] = []
+            
+            // Get detailed info for top 3 matches
+            for acoustResult in acoustResults.prefix(3) {
+                do {
+                    var metadata = try await musicBrainzService.getRecording(id: acoustResult.recordingId)
+                    metadata.confidence = acoustResult.score
+                    
+                    // Try to get artwork
+                    if let releaseId = metadata.releaseId ?? acoustResult.releaseId {
+                        if let artworkURL = try? await coverArtService.getArtworkURL(releaseId: releaseId) {
+                            metadata.artworkURL = artworkURL
+                        }
+                    }
+                    
+                    metadataResults.append(metadata)
+                } catch {
+                    print("[Identify] MusicBrainz error for \(acoustResult.recordingId): \(error)")
+                    // Still add basic info from AcoustID
+                    metadataResults.append(MusicMetadata(
+                        recordingId: acoustResult.recordingId,
+                        releaseId: acoustResult.releaseId,
+                        title: acoustResult.title,
+                        artist: acoustResult.artists.joined(separator: ", "),
+                        album: acoustResult.album ?? "Unknown Album",
+                        confidence: acoustResult.score
+                    ))
+                }
+            }
+            
+            identifyResults[index].suggestedMetadata = metadataResults
+            identifyResults[index].selectedMetadataIndex = 0 // Auto-select first match
+            identifyResults[index].status = .found(matchCount: metadataResults.count)
+            
+            // Auto-write metadata if match found with high confidence
+            if let bestMatch = metadataResults.first, bestMatch.confidence >= 0.7 {
+                do {
+                    try await metadataWriterService.writeMetadata(bestMatch, to: fileURL)
+                    print("[Identify] ✅ Auto-wrote metadata for: \(track.title)")
+                } catch {
+                    print("[Identify] ⚠️ Could not write metadata: \(error)")
+                }
+            }
+            
+        } catch {
+            print("[Identify] Error for \(track.title): \(error)")
+            identifyResults[index].status = .error(error.localizedDescription)
+        }
+    }
+    
+    @MainActor
+    func identifyAllTracks() {
+        identifyTracks(tracks)
+    }
+    
+    @MainActor
+    func abortIdentification() {
+        shouldAbortIdentify = true
+        isIdentifying = false
+        statusMessage = "Aborting identification..."
+    }
+    
+    // MARK: - Standalone Metadata Fixing
+    
+    @MainActor
+    func fixMetadataForLibrary() {
+        guard !isIdentifying && !isScanning else { return }
+        
+        isScanning = true
+        statusMessage = "Scanning Music Library for metadata fix..."
+        
+        Task {
+            do {
+                let scannedTracks = try await scanner.scanAppleMusicLibrary()
+                self.tracks = scannedTracks
+                self.statusMessage = "Found \(scannedTracks.count) tracks. Starting identification..."
+                isScanning = false
+                
+                // Now identify all tracks
+                identifyTracks(scannedTracks)
+                
+            } catch {
+                self.statusMessage = "Error scanning: \(error.localizedDescription)"
+                isScanning = false
+            }
+        }
+    }
+    
+    @MainActor
+    func fixMetadataForFolder(at url: URL) {
+        guard !isIdentifying && !isScanning else { return }
+        
+        isScanning = true
+        statusMessage = "Scanning folder for metadata fix..."
+        
+        Task {
+            do {
+                let scannedTracks = try await scanner.scanFolder(at: url)
+                self.tracks = scannedTracks
+                self.statusMessage = "Found \(scannedTracks.count) audio files. Starting identification..."
+                isScanning = false
+                
+                // Now identify all tracks
+                identifyTracks(scannedTracks)
+                
+            } catch {
+                self.statusMessage = "Error scanning folder: \(error.localizedDescription)"
+                isScanning = false
+            }
+        }
+    }
+    
+    /// Apply metadata to a file (called from UI when user clicks Apply)
+    func applyMetadata(_ metadata: MusicMetadata, to fileURL: URL) async throws {
+        try await metadataWriterService.writeMetadata(metadata, to: fileURL)
+        await MainActor.run {
+            statusMessage = "Applied: \(metadata.title) by \(metadata.artist)"
         }
     }
 }

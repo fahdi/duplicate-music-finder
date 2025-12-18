@@ -14,9 +14,13 @@ let package = Package(
             targets: ["DuplicateMusicFinder"]
         ),
     ],
+    dependencies: [
+        .package(url: "https://github.com/chicio/ID3TagEditor.git", from: "4.6.0")
+    ],
     targets: [
         .executableTarget(
             name: "DuplicateMusicFinder",
+            dependencies: ["ID3TagEditor"],
             path: "Sources",
             linkerSettings: [
                 .linkedFramework("iTunesLibrary")

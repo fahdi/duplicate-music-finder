@@ -49,5 +49,9 @@ struct ContentView: View {
         } message: {
             Text("This will move selected tracks to the Trash. You can undo this in Finder.")
         }
+        .sheet(isPresented: $viewModel.showIdentifyView) {
+            IdentifyView()
+                .environmentObject(viewModel)
+        }
     }
 }

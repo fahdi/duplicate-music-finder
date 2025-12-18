@@ -36,6 +36,16 @@ Listen to tracks directly in the app to verify duplicates before deletion.
 - **Stop Control**: Stop button appears in sidebar during playback
 - **Seamless Switching**: Click another track to switch playback instantly
 
+### Smart Tag - Auto-Fix Metadata (NEW)
+Automatically identify songs and fix incorrect metadata using audio fingerprinting.
+
+- **Audio Fingerprinting**: Uses Chromaprint/AcoustID for song identification
+- **MusicBrainz Integration**: Fetches correct title, artist, album, year from MusicBrainz database
+- **Album Artwork**: Automatically downloads and embeds cover art from Cover Art Archive
+- **Auto-Write**: Automatically updates MP3 files with correct metadata when match confidence ≥70%
+- **Independent Workflow**: Works separately from duplicate scanning
+- **No External Dependencies**: fpcalc binary bundled with app - no Homebrew required
+
 ### Smart Auto-Selection
 Multiple strategies to automatically select which copy to keep:
 - Highest Bitrate
@@ -107,6 +117,11 @@ The app uses MVVM architecture with the following components:
 - `FileTrashHandler` - Safe file deletion
 - `AudioFingerprintService` - FFT spectral analysis using AVFoundation + Accelerate
 - `AudioPlayerService` - Audio preview playback
+- `ChromaprintService` - Generates Chromaprint fingerprints using bundled fpcalc
+- `AcoustIDService` - Looks up songs via AcoustID API
+- `MusicBrainzService` - Fetches detailed metadata from MusicBrainz
+- `CoverArtService` - Downloads album artwork from Cover Art Archive
+- `MetadataWriterService` - Writes ID3 tags and artwork to MP3 files
 
 ### ViewModels
 - `AppViewModel` - Central state management
@@ -145,6 +160,8 @@ TBD
 - [x] Audio fingerprinting
 - [x] Audio preview playback
 - [x] Folder scanning support
+- [x] Smart Tag - auto-fix metadata
+- [x] M4A/AAC metadata writing
 - [ ] Batch export reports (CSV/JSON)
-- [ ] Missing artwork detection
+- [x] Missing artwork detection - to be tested
 - [ ] Music statistics dashboard

@@ -1,7 +1,9 @@
 import SwiftUI
+import AppKit
 
 struct SidebarView: View {
     @EnvironmentObject var viewModel: AppViewModel
+    @ObservedObject var audioPlayer: AudioPlayerService
     
     var body: some View {
         Form {
@@ -21,6 +23,29 @@ struct SidebarView: View {
                 }
             }
             
+            Section("Audio Fingerprint") {
+                Toggle("Enable Fingerprint Matching", isOn: $viewModel.criteria.matchFingerprint)
+                
+                if viewModel.criteria.matchFingerprint {
+                    Picker("Sample Duration", selection: $viewModel.fingerprintSettings.sampleDuration) {
+                        ForEach(FingerprintSettings.SampleDuration.allCases) { duration in
+                            Text(duration.rawValue).tag(duration)
+                        }
+                    }
+                    
+                    VStack(alignment: .leading) {
+                        Text("Similarity Threshold: \(Int(viewModel.fingerprintSettings.similarityThreshold * 100))%")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Slider(value: $viewModel.fingerprintSettings.similarityThreshold, in: 0.5...1.0, step: 0.05)
+                    }
+                    
+                    Text("Higher = stricter matching")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
             Section("Auto-Selection") {
                 Picker("Rule", selection: $viewModel.activeRule) {
                     ForEach(AutoSelectionRule.allCases) { rule in
@@ -37,17 +62,35 @@ struct SidebarView: View {
                 .disabled(viewModel.duplicateGroups.isEmpty)
             }
             
-            Section("Actions") {
-                Button(action: {
-                    viewModel.scanLibrary()
-                }) {
-                    if viewModel.isScanning {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Text("Scan Library")
+            Section("Playback") {
+                Toggle("Auto-Play on Select", isOn: $viewModel.autoPlayEnabled)
+                
+                if audioPlayer.isPlaying {
+                    Button(action: {
+                        viewModel.stopPlayback()
+                    }) {
+                        Label("Stop", systemImage: "stop.fill")
                     }
                 }
-                .disabled(viewModel.isScanning)
+            }
+            
+            Section("Actions") {
+                HStack {
+                    Button("Scan Library") {
+                        viewModel.scanLibrary()
+                    }
+                    .disabled(viewModel.isScanning)
+                    
+                    Button("Scan Folder...") {
+                        selectFolder()
+                    }
+                    .disabled(viewModel.isScanning)
+                    
+                    if viewModel.isScanning {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+                
                 
                 Button(role: .destructive, action: {
                     viewModel.showingDeleteConfirmation = true
@@ -59,5 +102,18 @@ struct SidebarView: View {
         }
         .formStyle(.grouped)
         .navigationTitle("Filters")
+    }
+    
+    private func selectFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "Select a folder to scan for duplicate audio files"
+        panel.prompt = "Scan"
+        
+        if panel.runModal() == .OK, let url = panel.url {
+            viewModel.scanFolder(at: url)
+        }
     }
 }

@@ -11,10 +11,29 @@ class AppViewModel: ObservableObject {
     @Published var activeRule: AutoSelectionRule = .manual
     @Published var showingDeleteConfirmation: Bool = false
     
+    // Fingerprint Settings
+    @Published var fingerprintSettings = FingerprintSettings()
+    
+    // Audio Playback
+    @Published var autoPlayEnabled: Bool = true
+    let audioPlayer = AudioPlayerService()
+    
     private let scanner = MusicScanner()
     private let duplicateEngine = DuplicateEngine()
     private let selectionManager = SelectionManager()
     private let trashHandler = FileTrashHandler()
+    private let fingerprintService = AudioFingerprintService()
+    
+    /// Play a track if auto-play is enabled
+    func playTrackIfEnabled(_ track: TrackModel) {
+        guard autoPlayEnabled, let url = track.fileURL else { return }
+        audioPlayer.play(url: url, trackId: track.id)
+    }
+    
+    /// Stop current playback
+    func stopPlayback() {
+        audioPlayer.stop()
+    }
 
     @MainActor
     func applySelectionRule() {
@@ -81,18 +100,68 @@ class AppViewModel: ObservableObject {
     func scanLibrary() {
         guard !isScanning else { return }
         
+        // Stop any playback and clear previous results
+        stopPlayback()
+        duplicateGroups = []
+        tracks = []
+        
         isScanning = true
         statusMessage = "Scanning Music Library..."
         
         Task {
             do {
                 // Scan
-                let scannedTracks = try await scanner.scanAppleMusicLibrary()
+                var scannedTracks = try await scanner.scanAppleMusicLibrary()
+                self.statusMessage = "Scan complete. Found \(scannedTracks.count) tracks."
+                
+                // Generate fingerprints if enabled (in parallel for speed)
+                if criteria.matchFingerprint {
+                    self.statusMessage = "Generating audio fingerprints..."
+                    
+                    // Process in parallel using TaskGroup
+                    let settings = fingerprintSettings
+                    let service = fingerprintService
+                    
+                    await withTaskGroup(of: (Int, AudioFingerprint?).self) { group in
+                        for i in 0..<scannedTracks.count {
+                            guard let url = scannedTracks[i].fileURL else { continue }
+                            
+                            group.addTask {
+                                do {
+                                    let fingerprint = try await service.generateFingerprint(for: url, settings: settings)
+                                    return (i, fingerprint)
+                                } catch {
+                                    print("Failed to fingerprint \(scannedTracks[i].title): \(error)")
+                                    return (i, nil)
+                                }
+                            }
+                        }
+                        
+                        var fingerprintedCount = 0
+                        for await (index, fingerprint) in group {
+                            if let fp = fingerprint {
+                                scannedTracks[index].fingerprint = fp
+                                fingerprintedCount += 1
+                                
+                                // Update progress
+                                if fingerprintedCount % 5 == 0 {
+                                    self.statusMessage = "Fingerprinting... \(fingerprintedCount)/\(scannedTracks.count)"
+                                }
+                            }
+                        }
+                        
+                        self.statusMessage = "Fingerprinted \(fingerprintedCount) tracks. Finding duplicates..."
+                    }
+                }
+                
                 self.tracks = scannedTracks
-                self.statusMessage = "Scan complete. Found \(scannedTracks.count) tracks. Finding duplicates..."
                 
                 // Find Duplicates
-                let groups = await duplicateEngine.findDuplicates(in: scannedTracks, criteria: self.criteria)
+                let groups = await duplicateEngine.findDuplicates(
+                    in: scannedTracks,
+                    criteria: self.criteria,
+                    fingerprintSettings: criteria.matchFingerprint ? fingerprintSettings : nil
+                )
                 self.duplicateGroups = groups
                 
                 self.statusMessage = "Found \(groups.count) duplicate groups."
@@ -104,3 +173,4 @@ class AppViewModel: ObservableObject {
         }
     }
 }
+

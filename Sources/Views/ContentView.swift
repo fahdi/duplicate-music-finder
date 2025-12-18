@@ -5,13 +5,19 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            SidebarView()
+            SidebarView(audioPlayer: viewModel.audioPlayer)
         } detail: {
             Group {
                 if viewModel.duplicateGroups.isEmpty {
-                    VStack {
+                    VStack(spacing: 16) {
                         if viewModel.isScanning {
-                            ProgressView("Scanning...")
+                            ProgressView()
+                                .scaleEffect(1.5)
+                            Text(viewModel.statusMessage)
+                                .font(.headline)
+                                .foregroundColor(.primary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
                         } else {
                             Text("No duplicates found")
                                 .font(.title)

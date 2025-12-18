@@ -1,10 +1,17 @@
 import SwiftUI
 
 struct TrackRowView: View {
+    @EnvironmentObject var viewModel: AppViewModel
+    @ObservedObject var audioPlayer: AudioPlayerService
+    
     let track: TrackModel
     let isSelected: Bool
     let isKept: Bool
     var onToggle: () -> Void
+    
+    private var isPlaying: Bool {
+        audioPlayer.currentTrackId == track.id && audioPlayer.isPlaying
+    }
     
     var body: some View {
         HStack {
@@ -14,6 +21,12 @@ struct TrackRowView: View {
                 .onTapGesture {
                     onToggle()
                 }
+            
+            // Play indicator - shows on currently playing track
+            Image(systemName: isPlaying ? "speaker.wave.2.fill" : "speaker.wave.2")
+                .foregroundColor(isPlaying ? .accentColor : .clear)
+                .font(.caption)
+                .frame(width: 16)
             
             VStack(alignment: .leading) {
                 Text(track.title)
@@ -36,8 +49,13 @@ struct TrackRowView: View {
         }
         .padding(.vertical, 4)
         .opacity(isSelected ? 0.6 : 1.0)
-        .background(isSelected ? Color.red.opacity(0.05) : Color.clear)
+        .background(isPlaying ? Color.accentColor.opacity(0.1) : (isSelected ? Color.red.opacity(0.05) : Color.clear))
         .cornerRadius(4)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            // Play this track on tap
+            viewModel.playTrackIfEnabled(track)
+        }
     }
     
     private func formatDuration(_ duration: TimeInterval) -> String {

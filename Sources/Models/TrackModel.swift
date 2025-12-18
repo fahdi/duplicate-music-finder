@@ -11,6 +11,9 @@ struct TrackModel: Identifiable, Hashable {
     let sampleRate: Int?
     let dateAdded: Date?
     let fileFormat: String // e.g., "mp3", "m4a"
+    
+    // Audio fingerprint for duplicate detection
+    var fingerprint: AudioFingerprint?
 
     // Helper for debugging
     var debugDescription: String {

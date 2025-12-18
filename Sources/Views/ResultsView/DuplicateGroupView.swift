@@ -8,6 +8,7 @@ struct DuplicateGroupView: View {
         Section(header: Text(groupHeader)) {
             ForEach(group.tracks) { track in
                 TrackRowView(
+                    audioPlayer: viewModel.audioPlayer,
                     track: track,
                     isSelected: group.tracksToRemove.contains(track.id),
                     isKept: group.tracksToKeep.contains(track.id),

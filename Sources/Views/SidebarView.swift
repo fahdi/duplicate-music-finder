@@ -74,7 +74,7 @@ struct SidebarView: View {
                 }
             }
             
-            Section("Actions") {
+            Section("Duplicate Finder") {
                 HStack {
                     Button("Scan Library") {
                         viewModel.scanLibrary()
@@ -82,7 +82,7 @@ struct SidebarView: View {
                     .disabled(viewModel.isScanning)
                     
                     Button("Scan Folder...") {
-                        selectFolder()
+                        selectFolderForDuplicates()
                     }
                     .disabled(viewModel.isScanning)
                     
@@ -91,7 +91,6 @@ struct SidebarView: View {
                     }
                 }
                 
-                
                 Button(role: .destructive, action: {
                     viewModel.showingDeleteConfirmation = true
                 }) {
@@ -99,12 +98,34 @@ struct SidebarView: View {
                 }
                 .disabled(viewModel.duplicateGroups.isEmpty)
             }
+            
+            Section("Smart Tag (Fix Metadata)") {
+                HStack {
+                    Button("Fix Library") {
+                        viewModel.fixMetadataForLibrary()
+                    }
+                    .disabled(viewModel.isIdentifying || viewModel.isScanning)
+                    
+                    Button("Fix Folder...") {
+                        selectFolderForMetadata()
+                    }
+                    .disabled(viewModel.isIdentifying || viewModel.isScanning)
+                    
+                    if viewModel.isIdentifying {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+                
+                Text("Identify songs & write correct metadata + artwork")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
         }
         .formStyle(.grouped)
         .navigationTitle("Filters")
     }
     
-    private func selectFolder() {
+    private func selectFolderForDuplicates() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -114,6 +135,19 @@ struct SidebarView: View {
         
         if panel.runModal() == .OK, let url = panel.url {
             viewModel.scanFolder(at: url)
+        }
+    }
+    
+    private func selectFolderForMetadata() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "Select a folder to fix metadata for audio files"
+        panel.prompt = "Fix Metadata"
+        
+        if panel.runModal() == .OK, let url = panel.url {
+            viewModel.fixMetadataForFolder(at: url)
         }
     }
 }

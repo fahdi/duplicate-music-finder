@@ -172,5 +172,79 @@ class AppViewModel: ObservableObject {
             self.isScanning = false
         }
     }
+    
+    @MainActor
+    func scanFolder(at url: URL) {
+        guard !isScanning else { return }
+        
+        // Stop any playback and clear previous results
+        stopPlayback()
+        duplicateGroups = []
+        tracks = []
+        
+        isScanning = true
+        statusMessage = "Scanning folder..."
+        
+        Task {
+            do {
+                // Scan folder
+                var scannedTracks = try await scanner.scanFolder(at: url)
+                self.statusMessage = "Found \(scannedTracks.count) audio files."
+                
+                // Generate fingerprints if enabled (in parallel for speed)
+                if criteria.matchFingerprint {
+                    self.statusMessage = "Generating audio fingerprints..."
+                    
+                    let settings = fingerprintSettings
+                    let service = fingerprintService
+                    
+                    await withTaskGroup(of: (Int, AudioFingerprint?).self) { group in
+                        for i in 0..<scannedTracks.count {
+                            guard let url = scannedTracks[i].fileURL else { continue }
+                            
+                            group.addTask {
+                                do {
+                                    let fingerprint = try await service.generateFingerprint(for: url, settings: settings)
+                                    return (i, fingerprint)
+                                } catch {
+                                    print("Failed to fingerprint \(scannedTracks[i].title): \(error)")
+                                    return (i, nil)
+                                }
+                            }
+                        }
+                        
+                        var fingerprintedCount = 0
+                        for await (index, fingerprint) in group {
+                            if let fp = fingerprint {
+                                scannedTracks[index].fingerprint = fp
+                                fingerprintedCount += 1
+                                
+                                if fingerprintedCount % 5 == 0 {
+                                    self.statusMessage = "Fingerprinting... \(fingerprintedCount)/\(scannedTracks.count)"
+                                }
+                            }
+                        }
+                        
+                        self.statusMessage = "Fingerprinted \(fingerprintedCount) tracks. Finding duplicates..."
+                    }
+                }
+                
+                self.tracks = scannedTracks
+                
+                // Find Duplicates
+                let groups = await duplicateEngine.findDuplicates(
+                    in: scannedTracks,
+                    criteria: self.criteria,
+                    fingerprintSettings: criteria.matchFingerprint ? fingerprintSettings : nil
+                )
+                self.duplicateGroups = groups
+                
+                self.statusMessage = "Found \(groups.count) duplicate groups in folder."
+                
+            } catch {
+                self.statusMessage = "Error scanning folder: \(error.localizedDescription)"
+            }
+            self.isScanning = false
+        }
+    }
 }
-

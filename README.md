@@ -4,8 +4,11 @@ A commercial-grade macOS desktop application built with SwiftUI to scan, detect,
 
 ## Features
 
-### Core Detection
-- **Music Library Scanning**: Reads from Music.app (iTunes Library) and supports direct folder scanning
+### Scan Sources
+- **Music Library**: Scan your Music.app (iTunes) library
+- **Folder Scanning**: Select any folder to scan for audio files (MP3, M4A, WAV, AAC, FLAC, AIFF)
+
+### Detection Criteria
 - **Flexible Metadata Detection**: User-selectable criteria including:
   - Track Title
   - Artist
@@ -51,7 +54,7 @@ Multiple strategies to automatically select which copy to keep:
 2. Select detection criteria in the sidebar:
    - **Metadata matching**: Title, Artist, Album, Duration
    - **Audio Fingerprint**: Enable for encoding-agnostic detection
-3. Click **Scan Library**
+3. Click **Scan Library** or **Scan Folder...** to choose a custom folder
 4. Review detected duplicates in the main view
 5. Click tracks to preview audio (if Auto-Play enabled)
 6. Select tracks to remove (click the circle icon)
@@ -98,7 +101,7 @@ The app uses MVVM architecture with the following components:
 - `FingerprintSettings` - User-configurable fingerprint parameters
 
 ### Services
-- `MusicScanner` - Reads Music.app library
+- `MusicScanner` - Reads Music.app library and scans folders
 - `DuplicateEngine` - Duplicate detection logic
 - `SelectionManager` - Auto-selection rules
 - `FileTrashHandler` - Safe file deletion
@@ -141,7 +144,7 @@ TBD
 
 - [x] Audio fingerprinting
 - [x] Audio preview playback
+- [x] Folder scanning support
 - [ ] Batch export reports (CSV/JSON)
 - [ ] Missing artwork detection
 - [ ] Music statistics dashboard
-- [ ] Folder scanning support in UI

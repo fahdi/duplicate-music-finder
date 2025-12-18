@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct SidebarView: View {
     @EnvironmentObject var viewModel: AppViewModel
@@ -74,16 +75,22 @@ struct SidebarView: View {
             }
             
             Section("Actions") {
-                Button(action: {
-                    viewModel.scanLibrary()
-                }) {
+                HStack {
+                    Button("Scan Library") {
+                        viewModel.scanLibrary()
+                    }
+                    .disabled(viewModel.isScanning)
+                    
+                    Button("Scan Folder...") {
+                        selectFolder()
+                    }
+                    .disabled(viewModel.isScanning)
+                    
                     if viewModel.isScanning {
                         ProgressView().controlSize(.small)
-                    } else {
-                        Text("Scan Library")
                     }
                 }
-                .disabled(viewModel.isScanning)
+                
                 
                 Button(role: .destructive, action: {
                     viewModel.showingDeleteConfirmation = true
@@ -95,5 +102,18 @@ struct SidebarView: View {
         }
         .formStyle(.grouped)
         .navigationTitle("Filters")
+    }
+    
+    private func selectFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "Select a folder to scan for duplicate audio files"
+        panel.prompt = "Scan"
+        
+        if panel.runModal() == .OK, let url = panel.url {
+            viewModel.scanFolder(at: url)
+        }
     }
 }

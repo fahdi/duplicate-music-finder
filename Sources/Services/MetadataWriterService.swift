@@ -114,53 +114,49 @@ class MetadataWriterService {
         // 2. Prepare metadata items
         var metadataItems: [AVMetadataItem] = []
         
-        func addMetadataItem(identifier: AVMetadataIdentifier, value: Any, keySpace: AVMetadataKeySpace = .common) {
+        func addMetadataItem(key: AVMetadataKey, value: Any, keySpace: AVMetadataKeySpace = .common) {
             let item = AVMutableMetadataItem()
-            item.identifier = identifier
-            item.value = value as? (NSCopying & NSObjectProtocol)
+            item.key = key.rawValue as (NSCopying & NSObjectProtocol)
             item.keySpace = keySpace
+            item.value = value as? (NSCopying & NSObjectProtocol)
             metadataItems.append(item)
         }
         
         // Core fields (Common KeySpace)
-        addMetadataItem(identifier: .commonKeyTitle, value: metadata.title)
-        addMetadataItem(identifier: .commonKeyArtist, value: metadata.artist)
-        addMetadataItem(identifier: .commonKeyAlbumName, value: metadata.album)
+        addMetadataItem(key: .commonKeyTitle, value: metadata.title)
+        addMetadataItem(key: .commonKeyArtist, value: metadata.artist)
+        addMetadataItem(key: .commonKeyAlbumName, value: metadata.album)
         
         // iTunes specific fields
         if let albumArtist = metadata.albumArtist {
-            addMetadataItem(identifier: .iTunesMetadataAlbumArtist, value: albumArtist, keySpace: .iTunes)
+            addMetadataItem(key: .iTunesMetadataKeyAlbumArtist, value: albumArtist, keySpace: .iTunes)
         }
         
         if let year = metadata.year {
-            // "day" atom usually expects string or date
-            addMetadataItem(identifier: .iTunesMetadataReleaseDate, value: String(year), keySpace: .iTunes)
+            addMetadataItem(key: .iTunesMetadataKeyReleaseDate, value: String(year), keySpace: .iTunes)
         }
         
         if let genre = metadata.genre {
-            addMetadataItem(identifier: .iTunesMetadataGenre, value: genre, keySpace: .iTunes)
+            addMetadataItem(key: .iTunesMetadataKeyUserGenre, value: genre, keySpace: .iTunes)
         }
         
-        // Track number (iTunes format: "trkn" atom expects 8 bytes of data)
+        // Track number (iTunes format)
         if let trackNumber = metadata.trackNumber {
             let total = metadata.totalTracks ?? 0
             var data = Data(count: 8)
-            // trkn format: [index (2 bytes), total (2 bytes), padding (4 bytes)] 
-            // Actually it depends on implementation, but standard is:
-            // [0-1: reserved, 2-3: track index, 4-5: total tracks, 6-7: disc number?]
             data[2] = UInt8((trackNumber >> 8) & 0xFF)
             data[3] = UInt8(trackNumber & 0xFF)
             data[4] = UInt8((total >> 8) & 0xFF)
             data[5] = UInt8(total & 0xFF)
             
-            addMetadataItem(identifier: .iTunesMetadataTrackNumber, value: data as NSData, keySpace: .iTunes)
+            addMetadataItem(key: .iTunesMetadataKeyTrackNumber, value: data as NSData, keySpace: .iTunes)
         }
         
         // Artwork
         if let artworkURL = metadata.artworkURL {
             do {
                 let artworkData = try await coverArtService.downloadArtwork(from: artworkURL)
-                addMetadataItem(identifier: .commonKeyArtwork, value: artworkData as NSData)
+                addMetadataItem(key: .commonKeyArtwork, value: artworkData as NSData)
                 print("[MetadataWriter] ✅ Added M4A artwork (\(artworkData.count / 1024) KB)")
             } catch {
                 print("[MetadataWriter] ⚠️ Could not download M4A artwork: \(error)")

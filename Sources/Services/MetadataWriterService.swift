@@ -191,73 +191,92 @@ class MetadataWriterService {
         }
     }
     
-    /// Writes metadata to a FLAC file using a hybrid approach:
-    /// - AVFoundation for text metadata (fast, native)
-    /// - metaflac CLI for artwork (reliable PICTURE block embedding)
+    /// Writes metadata to a FLAC file using bundled metaflac CLI tool
+    /// AVFoundation doesn't support FLAC export, so we use metaflac for everything
     private func writeFLACMetadata(_ metadata: MusicMetadata, to fileURL: URL) async throws {
         print("[MetadataWriter] Writing FLAC to: \(fileURL.lastPathComponent)")
         
-        let asset = AVURLAsset(url: fileURL)
-        
-        guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough) else {
-            throw WriterError.writeFailed(NSError(domain: "MetadataWriter", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create FLAC export session"]))
+        // Get bundled metaflac binary path
+        guard let resourcePath = Bundle.main.resourcePath else {
+            throw WriterError.writeFailed(NSError(
+                domain: "MetadataWriter",
+                code: 5,
+                userInfo: [NSLocalizedDescriptionKey: "Could not locate app resources"]
+            ))
         }
         
-        var metadataItems: [AVMetadataItem] = []
+        let metaflacPath = "\(resourcePath)/bin/metaflac"
         
-        func addMetadataItem(key: AVMetadataKey, value: Any, keySpace: AVMetadataKeySpace = .common) {
-            let item = AVMutableMetadataItem()
-            item.key = key.rawValue as (NSCopying & NSObjectProtocol)
-            item.keySpace = keySpace
-            item.value = value as? (NSCopying & NSObjectProtocol)
-            metadataItems.append(item)
+        // Check if bundled metaflac exists
+        guard FileManager.default.fileExists(atPath: metaflacPath) else {
+            throw WriterError.writeFailed(NSError(
+                domain: "MetadataWriter",
+                code: 5,
+                userInfo: [NSLocalizedDescriptionKey: "metaflac binary not found in app bundle. Please reinstall the application."]
+            ))
         }
         
-        // Write text metadata via AVFoundation
-        addMetadataItem(key: .commonKeyTitle, value: metadata.title)
-        addMetadataItem(key: .commonKeyArtist, value: metadata.artist)
-        addMetadataItem(key: .commonKeyAlbumName, value: metadata.album)
+        // Write text metadata using metaflac
+        try await writeFLACTextMetadata(metadata: metadata, flacFileURL: fileURL, metaflacPath: metaflacPath)
         
-        if let year = metadata.year {
-            addMetadataItem(key: .commonKeyCreationDate, value: String(year))
-        }
-        
-        if let genre = metadata.genre {
-            addMetadataItem(key: .commonKeyType, value: genre)
-        }
-        
-        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".flac")
-        exportSession.outputURL = tempURL
-        exportSession.outputFileType = AVFileType("org.xiph.flac")
-        exportSession.metadata = metadataItems
-        
-        await exportSession.export()
-        
-        guard exportSession.status == .completed else {
-            let error = exportSession.error ?? NSError(domain: "MetadataWriter", code: 4, userInfo: [NSLocalizedDescriptionKey: "FLAC Export failed with status \(exportSession.status.rawValue)"])
-            print("[MetadataWriter] ❌ FLAC Export failed: \(error)")
-            throw WriterError.writeFailed(error)
-        }
-        
-        // Replace original file with updated version
-        do {
-            try FileManager.default.removeItem(at: fileURL)
-            try FileManager.default.moveItem(at: tempURL, to: fileURL)
-            print("[MetadataWriter] ✅ Text metadata written to FLAC")
-        } catch {
-            print("[MetadataWriter] ❌ FLAC File replacement failed: \(error)")
-            throw WriterError.writeFailed(error)
-        }
-        
-        // Now embed artwork using metaflac (more reliable for PICTURE blocks)
+        // Write artwork if available
         if let artworkURL = metadata.artworkURL {
             do {
                 let artworkData = try await coverArtService.downloadArtwork(from: artworkURL)
                 try await embedFLACArtworkViaMetaflac(artworkData: artworkData, flacFileURL: fileURL)
-                print("[MetadataWriter] ✅ Artwork embedded via metaflac (\(artworkData.count / 1024) KB)")
+                print("[MetadataWriter] ✅ FLAC metadata and artwork written successfully")
             } catch {
                 print("[MetadataWriter] ⚠️ Could not embed FLAC artwork: \(error)")
                 // Don't throw - text metadata is already written successfully
+            }
+        } else {
+            print("[MetadataWriter] ✅ FLAC text metadata written successfully")
+        }
+    }
+    
+    /// Writes text metadata to FLAC using metaflac
+    private func writeFLACTextMetadata(metadata: MusicMetadata, flacFileURL: URL, metaflacPath: String) async throws {
+        // Remove all existing tags first
+        let removeProcess = Process()
+        removeProcess.executableURL = URL(fileURLWithPath: metaflacPath)
+        removeProcess.arguments = ["--remove-all-tags", flacFileURL.path]
+        
+        try removeProcess.run()
+        removeProcess.waitUntilExit()
+        
+        // Add new tags
+        var tags: [String] = []
+        tags.append("TITLE=\(metadata.title)")
+        tags.append("ARTIST=\(metadata.artist)")
+        tags.append("ALBUM=\(metadata.album)")
+        
+        if let year = metadata.year {
+            tags.append("DATE=\(year)")
+        }
+        
+        if let genre = metadata.genre {
+            tags.append("GENRE=\(genre)")
+        }
+        
+        for tag in tags {
+            let setProcess = Process()
+            setProcess.executableURL = URL(fileURLWithPath: metaflacPath)
+            setProcess.arguments = ["--set-tag=\(tag)", flacFileURL.path]
+            
+            let errorPipe = Pipe()
+            setProcess.standardError = errorPipe
+            
+            try setProcess.run()
+            setProcess.waitUntilExit()
+            
+            guard setProcess.terminationStatus == 0 else {
+                let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+                let errorMessage = String(data: errorData, encoding: .utf8) ?? "Unknown error"
+                throw WriterError.writeFailed(NSError(
+                    domain: "MetadataWriter",
+                    code: 6,
+                    userInfo: [NSLocalizedDescriptionKey: "metaflac failed to set tag: \(errorMessage)"]
+                ))
             }
         }
     }

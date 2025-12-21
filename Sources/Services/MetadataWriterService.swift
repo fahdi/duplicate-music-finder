@@ -191,14 +191,14 @@ class MetadataWriterService {
         }
     }
     
-    /// Writes metadata to a FLAC file using AVFoundation
+    /// Writes metadata to a FLAC file using a hybrid approach:
+    /// - AVFoundation for text metadata (fast, native)
+    /// - metaflac CLI for artwork (reliable PICTURE block embedding)
     private func writeFLACMetadata(_ metadata: MusicMetadata, to fileURL: URL) async throws {
         print("[MetadataWriter] Writing FLAC to: \(fileURL.lastPathComponent)")
         
         let asset = AVURLAsset(url: fileURL)
         
-        // For FLAC, Passthrough might not always support metadata injection on all systems,
-        // but it's the most efficient way to try first.
         guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough) else {
             throw WriterError.writeFailed(NSError(domain: "MetadataWriter", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create FLAC export session"]))
         }
@@ -213,7 +213,7 @@ class MetadataWriterService {
             metadataItems.append(item)
         }
         
-        // Common metadata works well for FLAC in AVFoundation
+        // Write text metadata via AVFoundation
         addMetadataItem(key: .commonKeyTitle, value: metadata.title)
         addMetadataItem(key: .commonKeyArtist, value: metadata.artist)
         addMetadataItem(key: .commonKeyAlbumName, value: metadata.album)
@@ -226,17 +226,6 @@ class MetadataWriterService {
             addMetadataItem(key: .commonKeyType, value: genre)
         }
         
-        // Artwork
-        if let artworkURL = metadata.artworkURL {
-            do {
-                let artworkData = try await coverArtService.downloadArtwork(from: artworkURL)
-                addMetadataItem(key: .commonKeyArtwork, value: artworkData as NSData)
-                print("[MetadataWriter] ✅ Added FLAC artwork (\(artworkData.count / 1024) KB)")
-            } catch {
-                print("[MetadataWriter] ⚠️ Could not download FLAC artwork: \(error)")
-            }
-        }
-        
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".flac")
         exportSession.outputURL = tempURL
         exportSession.outputFileType = AVFileType("org.xiph.flac")
@@ -244,19 +233,102 @@ class MetadataWriterService {
         
         await exportSession.export()
         
-        if exportSession.status == .completed {
-            do {
-                try FileManager.default.removeItem(at: fileURL)
-                try FileManager.default.moveItem(at: tempURL, to: fileURL)
-                print("[MetadataWriter] ✅ Successfully updated FLAC: \(fileURL.lastPathComponent)")
-            } catch {
-                print("[MetadataWriter] ❌ FLAC File replacement failed: \(error)")
-                throw WriterError.writeFailed(error)
-            }
-        } else {
+        guard exportSession.status == .completed else {
             let error = exportSession.error ?? NSError(domain: "MetadataWriter", code: 4, userInfo: [NSLocalizedDescriptionKey: "FLAC Export failed with status \(exportSession.status.rawValue)"])
             print("[MetadataWriter] ❌ FLAC Export failed: \(error)")
             throw WriterError.writeFailed(error)
+        }
+        
+        // Replace original file with updated version
+        do {
+            try FileManager.default.removeItem(at: fileURL)
+            try FileManager.default.moveItem(at: tempURL, to: fileURL)
+            print("[MetadataWriter] ✅ Text metadata written to FLAC")
+        } catch {
+            print("[MetadataWriter] ❌ FLAC File replacement failed: \(error)")
+            throw WriterError.writeFailed(error)
+        }
+        
+        // Now embed artwork using metaflac (more reliable for PICTURE blocks)
+        if let artworkURL = metadata.artworkURL {
+            do {
+                let artworkData = try await coverArtService.downloadArtwork(from: artworkURL)
+                try await embedFLACArtworkViaMetaflac(artworkData: artworkData, flacFileURL: fileURL)
+                print("[MetadataWriter] ✅ Artwork embedded via metaflac (\(artworkData.count / 1024) KB)")
+            } catch {
+                print("[MetadataWriter] ⚠️ Could not embed FLAC artwork: \(error)")
+                // Don't throw - text metadata is already written successfully
+            }
+        }
+    }
+    
+    /// Embeds artwork into FLAC file using metaflac CLI tool
+    /// This is more reliable than AVFoundation for FLAC PICTURE blocks
+    private func embedFLACArtworkViaMetaflac(artworkData: Data, flacFileURL: URL) async throws {
+        // Save artwork to temp file
+        let tempArtworkURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+        try artworkData.write(to: tempArtworkURL)
+        
+        defer {
+            try? FileManager.default.removeItem(at: tempArtworkURL)
+        }
+        
+        // Check if metaflac is available
+        let checkProcess = Process()
+        checkProcess.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        checkProcess.arguments = ["which", "metaflac"]
+        
+        let checkPipe = Pipe()
+        checkProcess.standardOutput = checkPipe
+        checkProcess.standardError = Pipe()
+        
+        try checkProcess.run()
+        checkProcess.waitUntilExit()
+        
+        guard checkProcess.terminationStatus == 0 else {
+            throw WriterError.writeFailed(NSError(
+                domain: "MetadataWriter",
+                code: 5,
+                userInfo: [NSLocalizedDescriptionKey: "metaflac not found. Install via: brew install flac"]
+            ))
+        }
+        
+        // Remove existing artwork blocks
+        let removeProcess = Process()
+        removeProcess.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        removeProcess.arguments = [
+            "metaflac",
+            "--remove",
+            "--block-type=PICTURE",
+            flacFileURL.path
+        ]
+        
+        try removeProcess.run()
+        removeProcess.waitUntilExit()
+        
+        // Import new artwork
+        let importProcess = Process()
+        importProcess.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        importProcess.arguments = [
+            "metaflac",
+            "--import-picture-from=\(tempArtworkURL.path)",
+            flacFileURL.path
+        ]
+        
+        let errorPipe = Pipe()
+        importProcess.standardError = errorPipe
+        
+        try importProcess.run()
+        importProcess.waitUntilExit()
+        
+        guard importProcess.terminationStatus == 0 else {
+            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            let errorMessage = String(data: errorData, encoding: .utf8) ?? "Unknown error"
+            throw WriterError.writeFailed(NSError(
+                domain: "MetadataWriter",
+                code: 6,
+                userInfo: [NSLocalizedDescriptionKey: "metaflac failed: \(errorMessage)"]
+            ))
         }
     }
 }

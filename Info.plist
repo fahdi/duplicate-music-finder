@@ -11,9 +11,9 @@
 	<key>CFBundleName</key>
 	<string>DuplicateMusicFinder</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>1.1.0</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>2</string>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>Duplicate Music Finder needs access to your Music library to scan for duplicate tracks.</string>
     <key>NSAppleEventsUsageDescription</key>

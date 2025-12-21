@@ -262,7 +262,7 @@ class MetadataWriterService {
         }
     }
     
-    /// Embeds artwork into FLAC file using metaflac CLI tool
+    /// Embeds artwork into FLAC file using bundled metaflac CLI tool
     /// This is more reliable than AVFoundation for FLAC PICTURE blocks
     private func embedFLACArtworkViaMetaflac(artworkData: Data, flacFileURL: URL) async throws {
         // Save artwork to temp file
@@ -273,31 +273,30 @@ class MetadataWriterService {
             try? FileManager.default.removeItem(at: tempArtworkURL)
         }
         
-        // Check if metaflac is available
-        let checkProcess = Process()
-        checkProcess.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        checkProcess.arguments = ["which", "metaflac"]
-        
-        let checkPipe = Pipe()
-        checkProcess.standardOutput = checkPipe
-        checkProcess.standardError = Pipe()
-        
-        try checkProcess.run()
-        checkProcess.waitUntilExit()
-        
-        guard checkProcess.terminationStatus == 0 else {
+        // Get bundled metaflac binary path
+        guard let resourcePath = Bundle.main.resourcePath else {
             throw WriterError.writeFailed(NSError(
                 domain: "MetadataWriter",
                 code: 5,
-                userInfo: [NSLocalizedDescriptionKey: "metaflac not found. Install via: brew install flac"]
+                userInfo: [NSLocalizedDescriptionKey: "Could not locate app resources"]
+            ))
+        }
+        
+        let metaflacPath = "\(resourcePath)/bin/metaflac"
+        
+        // Check if bundled metaflac exists
+        guard FileManager.default.fileExists(atPath: metaflacPath) else {
+            throw WriterError.writeFailed(NSError(
+                domain: "MetadataWriter",
+                code: 5,
+                userInfo: [NSLocalizedDescriptionKey: "metaflac binary not found in app bundle. Please reinstall the application."]
             ))
         }
         
         // Remove existing artwork blocks
         let removeProcess = Process()
-        removeProcess.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        removeProcess.executableURL = URL(fileURLWithPath: metaflacPath)
         removeProcess.arguments = [
-            "metaflac",
             "--remove",
             "--block-type=PICTURE",
             flacFileURL.path
@@ -308,9 +307,8 @@ class MetadataWriterService {
         
         // Import new artwork
         let importProcess = Process()
-        importProcess.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        importProcess.executableURL = URL(fileURLWithPath: metaflacPath)
         importProcess.arguments = [
-            "metaflac",
             "--import-picture-from=\(tempArtworkURL.path)",
             flacFileURL.path
         ]

@@ -38,6 +38,8 @@ class MetadataWriterService {
             try await writeMP3Metadata(metadata, to: fileURL)
         case "m4a", "aac", "mp4":
             try await writeM4AMetadata(metadata, to: fileURL)
+        case "flac":
+            try await writeFLACMetadata(metadata, to: fileURL)
         default:
             throw WriterError.unsupportedFormat(ext.uppercased())
         }
@@ -185,6 +187,75 @@ class MetadataWriterService {
         } else {
             let error = exportSession.error ?? NSError(domain: "MetadataWriter", code: 2, userInfo: [NSLocalizedDescriptionKey: "Export failed with status \(exportSession.status.rawValue)"])
             print("[MetadataWriter] ❌ Export failed: \(error)")
+            throw WriterError.writeFailed(error)
+        }
+    }
+    
+    /// Writes metadata to a FLAC file using AVFoundation
+    private func writeFLACMetadata(_ metadata: MusicMetadata, to fileURL: URL) async throws {
+        print("[MetadataWriter] Writing FLAC to: \(fileURL.lastPathComponent)")
+        
+        let asset = AVURLAsset(url: fileURL)
+        
+        // For FLAC, Passthrough might not always support metadata injection on all systems,
+        // but it's the most efficient way to try first.
+        guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough) else {
+            throw WriterError.writeFailed(NSError(domain: "MetadataWriter", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create FLAC export session"]))
+        }
+        
+        var metadataItems: [AVMetadataItem] = []
+        
+        func addMetadataItem(key: AVMetadataKey, value: Any, keySpace: AVMetadataKeySpace = .common) {
+            let item = AVMutableMetadataItem()
+            item.key = key.rawValue as (NSCopying & NSObjectProtocol)
+            item.keySpace = keySpace
+            item.value = value as? (NSCopying & NSObjectProtocol)
+            metadataItems.append(item)
+        }
+        
+        // Common metadata works well for FLAC in AVFoundation
+        addMetadataItem(key: .commonKeyTitle, value: metadata.title)
+        addMetadataItem(key: .commonKeyArtist, value: metadata.artist)
+        addMetadataItem(key: .commonKeyAlbumName, value: metadata.album)
+        
+        if let year = metadata.year {
+            addMetadataItem(key: .commonKeyCreationDate, value: String(year))
+        }
+        
+        if let genre = metadata.genre {
+            addMetadataItem(key: .commonKeyType, value: genre)
+        }
+        
+        // Artwork
+        if let artworkURL = metadata.artworkURL {
+            do {
+                let artworkData = try await coverArtService.downloadArtwork(from: artworkURL)
+                addMetadataItem(key: .commonKeyArtwork, value: artworkData as NSData)
+                print("[MetadataWriter] ✅ Added FLAC artwork (\(artworkData.count / 1024) KB)")
+            } catch {
+                print("[MetadataWriter] ⚠️ Could not download FLAC artwork: \(error)")
+            }
+        }
+        
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".flac")
+        exportSession.outputURL = tempURL
+        exportSession.outputFileType = AVFileType("org.xiph.flac")
+        exportSession.metadata = metadataItems
+        
+        await exportSession.export()
+        
+        if exportSession.status == .completed {
+            do {
+                try FileManager.default.removeItem(at: fileURL)
+                try FileManager.default.moveItem(at: tempURL, to: fileURL)
+                print("[MetadataWriter] ✅ Successfully updated FLAC: \(fileURL.lastPathComponent)")
+            } catch {
+                print("[MetadataWriter] ❌ FLAC File replacement failed: \(error)")
+                throw WriterError.writeFailed(error)
+            }
+        } else {
+            let error = exportSession.error ?? NSError(domain: "MetadataWriter", code: 4, userInfo: [NSLocalizedDescriptionKey: "FLAC Export failed with status \(exportSession.status.rawValue)"])
+            print("[MetadataWriter] ❌ FLAC Export failed: \(error)")
             throw WriterError.writeFailed(error)
         }
     }

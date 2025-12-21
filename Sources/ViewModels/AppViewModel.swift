@@ -139,8 +139,14 @@ class AppViewModel: ObservableObject {
                     let service = fingerprintService
                     
                     await withTaskGroup(of: (Int, AudioFingerprint?).self) { group in
+                        let durations = scannedTracks.map { $0.duration }
                         for i in 0..<scannedTracks.count {
                             guard let url = scannedTracks[i].fileURL else { continue }
+                            
+                            let curDur = scannedTracks[i].duration
+                            if !durations.enumerated().contains(where: { $0 != i && abs($1 - curDur) <= 30.0 }) {
+                                continue
+                            }
                             
                             group.addTask {
                                 do {
@@ -215,8 +221,14 @@ class AppViewModel: ObservableObject {
                     let service = fingerprintService
                     
                     await withTaskGroup(of: (Int, AudioFingerprint?).self) { group in
+                        let durations = scannedTracks.map { $0.duration }
                         for i in 0..<scannedTracks.count {
                             guard let url = scannedTracks[i].fileURL else { continue }
+                            
+                            let curDur = scannedTracks[i].duration
+                            if !durations.enumerated().contains(where: { $0 != i && abs($1 - curDur) <= 30.0 }) {
+                                continue
+                            }
                             
                             group.addTask {
                                 do {

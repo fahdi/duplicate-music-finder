@@ -32,6 +32,12 @@ if [ -f "Resources/fpcalc" ]; then
     chmod +x "${RESOURCES_DIR}/fpcalc"
 fi
 
+if [ -d "Resources/bin" ]; then
+    echo "Copying metaflac and FLAC libraries..."
+    cp -r "Resources/bin" "${RESOURCES_DIR}/"
+    chmod +x "${RESOURCES_DIR}/bin/metaflac"
+fi
+
 echo "Signing (Ad-Hoc)..."
 codesign --force --deep --sign - "${APP_BUNDLE}"
 
